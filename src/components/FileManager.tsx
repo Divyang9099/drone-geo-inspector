@@ -97,6 +97,7 @@ const FileManager: React.FC = () => {
         hoveredImage,
         selectedImage,
         setSelectedImage,
+        setHoveredImage,
         setPendingCard,
         expandedFolders,
         toggleFolderExpanded,
@@ -121,10 +122,12 @@ const FileManager: React.FC = () => {
 
     const totalImages = folders.reduce((s, f) => s + f.images.length, 0)
 
-    // Sidebar click: fly to marker, then show card exactly beside pin after animation
+    // Sidebar click: IMMEDIATELY show card at map center + start flyTo animation.
+    // PendingCardHandler repositions the card to the exact marker pixel after moveend.
     const handleImageClick = (img: ImageData) => {
-        setSelectedImage(img)   // → triggers map.flyTo() via FocusSelected
-        setPendingCard(img)     // → MapView fires setHoveredImage after moveend
+        setSelectedImage(img)               // → triggers map.flyTo() via FocusSelected
+        setHoveredImage(img, { x: 390, y: 230 }) // → card appears instantly at center
+        setPendingCard(img)                 // → card repositions to marker after flyTo
     }
 
     if (folders.length === 0) {

@@ -9,22 +9,22 @@ const HoverCard: React.FC = () => {
         openLightbox,
         setSelectedImage,
         setHoveredImage,
+        keepHoverAlive,
+        scheduleHoverClear,
     } = useStore()
 
     if (!hoveredImage || !hoverPosition) return null
 
     // Smart position: flip left if near right edge, flip up if near bottom
     const CARD_W = 248
-    const CARD_H = 220
-    const MARGIN = 18
+    const CARD_H = 225
+    const MARGIN = 16
 
     let left = hoverPosition.x + MARGIN
     let top = hoverPosition.y - 10
 
-    // Keep card inside the map viewport (approx 800px wide, 600px tall)
     if (hoverPosition.x > 550) left = hoverPosition.x - CARD_W - MARGIN
-    if (hoverPosition.y > 320) top = hoverPosition.y - CARD_H - MARGIN
-    // Never go off-screen left/top
+    if (hoverPosition.y > 300) top = hoverPosition.y - CARD_H - MARGIN
     if (left < 4) left = 4
     if (top < 4) top = 4
 
@@ -37,25 +37,22 @@ const HoverCard: React.FC = () => {
 
     return (
         /*
-         * IMPORTANT: pointer-events: none on the wrapper so this floating card
-         * NEVER blocks Leaflet mouseover/mouseout events on the markers below.
-         * Only the interactive children (close btn, full-view btn) re-enable
-         * pointer-events so they remain clickable.
+         * NO backdrop — the backdrop was blocking all marker mouse events.
+         * The card uses pointer-events:auto so keepHoverAlive works,
+         * letting users move to the card and click buttons without it disappearing.
+         * When the user hovers a different marker, setHoveredImage updates instantly.
          */
         <div
             className="hover-card"
-            style={{ left, top, pointerEvents: 'none' }}
+            style={{ left, top }}
+            onMouseEnter={keepHoverAlive}
+            onMouseLeave={scheduleHoverClear}
         >
             {/* Folder color stripe */}
             <div className="hover-card-stripe" style={{ background: hoveredImage.folderColor }} />
 
-            {/* Close button — re-enables pointer-events just for itself */}
-            <button
-                className="hover-card-close"
-                style={{ pointerEvents: 'auto' }}
-                onClick={closeCard}
-                title="Close"
-            >✕</button>
+            {/* Close ✕ button */}
+            <button className="hover-card-close" onClick={closeCard} title="Close">✕</button>
 
             {/* Thumbnail */}
             {hoveredImage.objectUrl && (
@@ -86,7 +83,6 @@ const HoverCard: React.FC = () => {
 
                 <button
                     className="hover-card-btn"
-                    style={{ pointerEvents: 'auto' }}
                     onClick={() => {
                         setSelectedImage(hoveredImage)
                         openLightbox(hoveredImage)

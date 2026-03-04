@@ -4,6 +4,7 @@ import {
     TileLayer,
     Polyline,
     useMap,
+    useMapEvents,
     ScaleControl,
     ZoomControl,
     Popup,
@@ -53,26 +54,46 @@ const LAYER_OPTIONS: Array<{ key: MapLayer; label: string }> = [
     { key: 'street', label: '🏙 Street' },
 ]
 
-// ── Marker icon factory ───────────────────────────────────────
+// ── Marker icon factory ─────────────────────────────────────────
+// Outer wrapper adds invisible padding so hover fires in a wider area.
+// The visible dot is centered inside.
 function createMarkerIcon(color: string, isSelected: boolean): L.DivIcon {
-    const size = isSelected ? 18 : 11
+    const dot = isSelected ? 22 : 16      // visible dot size (px)
+    const pad = 6                          // invisible padding around dot (px)
+    const total = dot + pad * 2            // total icon size including padding
     const ring = isSelected
-        ? `box-shadow:0 0 0 3px ${color}55, 0 0 14px ${color}99;`
-        : `box-shadow:0 2px 6px rgba(0,0,0,0.5);`
+        ? `box-shadow:0 0 0 3px ${color}55, 0 0 16px ${color}aa;`
+        : `box-shadow:0 2px 6px rgba(0,0,0,0.55);`
     return L.divIcon({
         className: '',
+        // Outer transparent wrapper extends hit area; inner div is the visible dot
         html: `<div style="
-      width:${size}px;
-      height:${size}px;
+      width:${total}px;
+      height:${total}px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      cursor:pointer;
+    "><div style="
+      width:${dot}px;
+      height:${dot}px;
       background:${color};
       border-radius:50%;
-      border:2px solid rgba(255,255,255,0.95);
+      border:2.5px solid rgba(255,255,255,0.95);
       ${ring}
       transition:all 0.15s ease;
-    "></div>`,
-        iconSize: [size, size],
-        iconAnchor: [size / 2, size / 2],
+    "></div></div>`,
+        iconSize: [total, total],
+        iconAnchor: [total / 2, total / 2],
     })
+}
+
+// ── Type-based marker color ───────────────────────────────────────────
+// Thermal always orange so pairs (thermal+visual at same GPS) are
+// visually distinct even after jitter offset separates them.
+function getMarkerColor(image: ImageData): string {
+    if (image.type === 'thermal') return '#f97316'  // 🌡 orange
+    return image.folderColor                         // 📷 folder color
 }
 
 // ── Cluster icon factory ───────────────────────────────────────
@@ -127,8 +148,15 @@ const FocusSelected: React.FC<{ selected: ImageData | null }> = ({ selected }) =
     const map = useMap()
     useEffect(() => {
         if (!selected) return
-        map.flyTo([selected.latitude, selected.longitude], 21, { duration: 1.8, easeLinearity: 0.2 })
+        map.flyTo([selected.latitude, selected.longitude], 21, { duration: 1.0, easeLinearity: 0.2 })
     }, [selected, map])
+    return null
+}
+
+// ── Instant close hover card when clicking empty map space ────────
+const CloseCardOnMapClick: React.FC = () => {
+    const { setHoveredImage } = useStore()
+    useMapEvents({ click: () => setHoveredImage(null, null) })
     return null
 }
 
@@ -172,45 +200,68 @@ const LayerToggle: React.FC = () => {
     )
 }
 
-// ── Professional Jitter: Golden-angle spiral ──────────────────
-// Groups points by a ~2m grid cell and fans duplicates out in a
-// proper spiral so they never stack, even at max zoom.
+// ── True Spatial Jitter: uniformly spread close points ──────────────────
+// Groups images that are physically within ~8 meters of each other (0.00008 deg)
+// and spreads them around their shared center point. This ensures that even
+// points just across a string-rounding boundary get properly grouped and fanned out.
 function buildJitteredPositions(images: ImageData[]): Map<string, [number, number]> {
     const positions = new Map<string, [number, number]>()
+    const groups: ImageData[][] = []
+    const THRESHOLD = 0.00008 // approx 8-9 meters
 
-    // Grid key at ~1m precision (5 decimal places ≈ 1.1m cell)
-    const grid = new Map<string, ImageData[]>()
+    // Spatial grouping
     for (const img of images) {
-        const key = `${img.latitude.toFixed(5)},${img.longitude.toFixed(5)}`
-        if (!grid.has(key)) grid.set(key, [])
-        grid.get(key)!.push(img)
+        let found = false
+        for (const group of groups) {
+            // Check if this image is close to ANY image in the group
+            const isClose = group.some(g =>
+                Math.abs(g.latitude - img.latitude) < THRESHOLD &&
+                Math.abs(g.longitude - img.longitude) < THRESHOLD
+            )
+            if (isClose) {
+                group.push(img)
+                found = true
+                break
+            }
+        }
+        if (!found) groups.push([img])
     }
 
-    for (const group of grid.values()) {
+    // Apply jitter to each group
+    for (const group of groups) {
         if (group.length === 1) {
-            // No duplicate — exact GPS position
+            // Lone image — exact GPS
             positions.set(group[0].id, [group[0].latitude, group[0].longitude])
         } else {
-            // Spiral fan: center stays exact, others spread out
-            // Each ring adds ~2m of offset (0.000018° lat ≈ 2m)
-            group.forEach((img, i) => {
-                if (i === 0) {
-                    positions.set(img.id, [img.latitude, img.longitude])
-                } else {
-                    const angle = i * 2.399963            // golden angle ≈ 137.5°
-                    const ring = Math.ceil(i / 8)         // 8 points per ring
-                    const radius = 0.000018 * ring         // ~2m per ring
-                    positions.set(img.id, [
-                        img.latitude + radius * Math.sin(angle),
-                        img.longitude + radius * Math.cos(angle),
-                    ])
-                }
+            // Calculate center of mass for the group
+            const cLat = group.reduce((sum, img) => sum + img.latitude, 0) / group.length
+            const cLng = group.reduce((sum, img) => sum + img.longitude, 0) / group.length
+
+            // Sort: visual first (at 0°), thermal second (at 180° for pairs)
+            // This guarantees thermal & visual are always on opposite sides
+            const sorted = [...group].sort((a, b) => {
+                const rank = (t: string) => t === 'visual' ? 0 : t === 'thermal' ? 1 : 2
+                return rank(a.type) - rank(b.type)
+            })
+
+            const n = sorted.length
+            // Base radius: 0.000040° ≈ 4.4m; grows a little for large groups
+            const radius = 0.000040 * (1 + Math.max(0, n - 2) * 0.15)
+
+            sorted.forEach((img, i) => {
+                // Evenly distribute angles; start at 90° so pair is N/S not E/W
+                const angle = (Math.PI / 2) + (i / n) * Math.PI * 2
+                positions.set(img.id, [
+                    cLat + radius * Math.sin(angle),
+                    cLng + radius * Math.cos(angle),
+                ])
             })
         }
     }
 
     return positions
 }
+
 
 // ── Main MapView ──────────────────────────────────────────────
 const MapView: React.FC = () => {
@@ -267,6 +318,7 @@ const MapView: React.FC = () => {
                 <FitBounds images={filteredImages} />
                 <FocusSelected selected={selectedImage} />
                 <PendingCardHandler />
+                <CloseCardOnMapClick />
 
                 {showPath && polylinePoints.length > 1 && (
                     <Polyline positions={polylinePoints}
@@ -294,19 +346,23 @@ const MapView: React.FC = () => {
                             const bounds = L.latLngBounds(
                                 childMarkers.map((m) => m.getLatLng())
                             )
-                            // Fly with animation — pad slightly so pins aren't at edges
+                            // Use fitBounds instead of flyToBounds to prevent the "zoom out" parabola effect.
+                            // This zooms directly straight in to the markers.
                             const map: L.Map = e.sourceTarget._map ?? cluster._map
-                            map.flyToBounds(bounds.pad(0.25), {
+                            map.fitBounds(bounds, {
+                                padding: [50, 50],
                                 maxZoom: 19,
-                                // @ts-ignore: duration is a valid flyTo option passed through
-                                duration: 1.2,
+                                animate: true,
+                                duration: 0.6,
                             })
                         },
                     }}
                 >
                     {filteredImages.map((image) => {
                         const isSelected = selectedImage?.id === image.id
-                        const icon = createMarkerIcon(image.folderColor, isSelected)
+                        // Color: thermal always orange, visual gets folder color
+                        const markerColor = getMarkerColor(image)
+                        const icon = createMarkerIcon(markerColor, isSelected)
                         const pos = jitteredPositions.get(image.id) ?? [image.latitude, image.longitude]
 
                         return (
