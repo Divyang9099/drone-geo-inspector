@@ -58,12 +58,16 @@ const LAYER_OPTIONS: Array<{ key: MapLayer; label: string }> = [
 // Outer wrapper adds invisible padding so hover fires in a wider area.
 // The visible dot is centered inside.
 function createMarkerIcon(color: string, isSelected: boolean): L.DivIcon {
-    const dot = isSelected ? 22 : 16      // visible dot size (px)
-    const pad = 6                          // invisible padding around dot (px)
-    const total = dot + pad * 2            // total icon size including padding
+    const dot = isSelected ? 26 : 16      // visible dot size (px)
+    const pad = isSelected ? 8 : 6        // invisible padding around dot (px)
+    const total = dot + pad * 2           // total icon size including padding
     const ring = isSelected
-        ? `box-shadow:0 0 0 3px ${color}55, 0 0 16px ${color}aa;`
+        ? `box-shadow:0 0 0 4px #ffffff, 0 0 20px ${color}ff;`
         : `box-shadow:0 2px 6px rgba(0,0,0,0.55);`
+
+    // Add pulsing class name if selected
+    const extraClass = isSelected ? 'marker-selected-pulse' : ''
+
     return L.divIcon({
         className: '',
         // Outer transparent wrapper extends hit area; inner div is the visible dot
@@ -74,12 +78,12 @@ function createMarkerIcon(color: string, isSelected: boolean): L.DivIcon {
       align-items:center;
       justify-content:center;
       cursor:pointer;
-    "><div style="
+    "><div class="${extraClass}" style="
       width:${dot}px;
       height:${dot}px;
       background:${color};
       border-radius:50%;
-      border:2.5px solid rgba(255,255,255,0.95);
+      border:3px solid rgba(255,255,255,0.95);
       ${ring}
       transition:all 0.15s ease;
     "></div></div>`,
@@ -346,14 +350,20 @@ const MapView: React.FC = () => {
                             const bounds = L.latLngBounds(
                                 childMarkers.map((m) => m.getLatLng())
                             )
-                            // Use fitBounds instead of flyToBounds to prevent the "zoom out" parabola effect.
-                            // This zooms directly straight in to the markers.
+                            // Calculate the required zoom to fit these bounds
                             const map: L.Map = e.sourceTarget._map ?? cluster._map
-                            map.fitBounds(bounds, {
-                                padding: [50, 50],
-                                maxZoom: 19,
+                            const currentZoom = map.getZoom()
+                            const targetZoom = map.getBoundsZoom(bounds, false, L.point(50, 50))
+
+                            // GUARANTEE NO ZOOMING OUT: 
+                            // If Leaflet thinks we should zoom out, NO. Force at least a +2 zoom in.
+                            // If Leaflet wants to zoom in a lot, let it. Max cap at 20.
+                            const finalZoom = Math.min(Math.max(currentZoom + 2, targetZoom), 20)
+
+                            // Zoom directly to the exact cluster point instead of full bounds to prevent weird panning
+                            map.setView(cluster.getLatLng(), finalZoom, {
                                 animate: true,
-                                duration: 0.6,
+                                duration: 0.5,
                             })
                         },
                     }}

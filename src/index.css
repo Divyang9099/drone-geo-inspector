@@ -1531,8 +1531,30 @@ body {
 }
 
 /* ============================================================
-   HOVER CARD (floating over map)
+   MAP MARKERS & HOVER CARD
    ============================================================ */
+@keyframes marker-pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.7);
+  }
+
+  70% {
+    transform: scale(1.15);
+    box-shadow: 0 0 0 12px rgba(255, 255, 255, 0);
+  }
+
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+}
+
+.marker-selected-pulse {
+  animation: marker-pulse 1.5s infinite ease-in-out;
+  z-index: 1000 !important;
+}
+
 @keyframes hc-pop {
   from {
     opacity: 0;
