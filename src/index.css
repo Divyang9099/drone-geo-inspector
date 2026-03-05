@@ -1775,6 +1775,28 @@ body {
   flex-shrink: 0;
 }
 
+/* Group badge — shown in popup when multiple images share a GPS point */
+.popup-group-badge {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 7px;
+}
+
+.popup-group-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid;
+  letter-spacing: 0.02em;
+  text-transform: capitalize;
+}
+
+
 /* ============================================================
    LIGHTBOX FOLDER PILL
    ============================================================ */

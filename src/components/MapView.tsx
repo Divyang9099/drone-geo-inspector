@@ -54,31 +54,65 @@ const LAYER_OPTIONS: Array<{ key: MapLayer; label: string }> = [
     { key: 'street', label: '🏙 Street' },
 ]
 
-// ── Marker icon factory ─────────────────────────────────────────
-// Outer wrapper adds invisible padding so hover fires in a wider area.
-// The visible dot is centered inside.
+// ── Single-image marker icon ─────────────────────────────────────
 function createMarkerIcon(color: string, isSelected: boolean): L.DivIcon {
-    const dot = isSelected ? 26 : 16      // visible dot size (px)
-    const pad = isSelected ? 8 : 6        // invisible padding around dot (px)
-    const total = dot + pad * 2           // total icon size including padding
+    const dot = isSelected ? 26 : 16
+    const pad = isSelected ? 8 : 6
+    const total = dot + pad * 2
     const ring = isSelected
         ? `box-shadow:0 0 0 4px #ffffff, 0 0 20px ${color}ff;`
         : `box-shadow:0 2px 6px rgba(0,0,0,0.55);`
-
-    // Add pulsing class name if selected
     const extraClass = isSelected ? 'marker-selected-pulse' : ''
 
     return L.divIcon({
         className: '',
-        // Outer transparent wrapper extends hit area; inner div is the visible dot
-        html: `<div style="
-      width:${total}px;
-      height:${total}px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      cursor:pointer;
-    "><div class="${extraClass}" style="
+        html: `<div style="width:${total}px;height:${total}px;display:flex;align-items:center;justify-content:center;cursor:pointer;"><div class="${extraClass}" style="width:${dot}px;height:${dot}px;background:${color};border-radius:50%;border:3px solid rgba(255,255,255,0.95);${ring}transition:all 0.15s ease;"></div></div>`,
+        iconSize: [total, total],
+        iconAnchor: [total / 2, total / 2],
+    })
+}
+
+// ── Grouped marker icon: same color dot, slightly larger, with count badge ──
+// Shows how many images are stacked at the same GPS point.
+// Color = representative image's type color (same logic as single marker).
+function createGroupedMarkerIcon(color: string, count: number, isSelected: boolean): L.DivIcon {
+    const dot = isSelected ? 32 : 22        // a bit larger than single (16/26)
+    const pad = isSelected ? 10 : 8
+    const total = dot + pad * 2
+    const ring = isSelected
+        ? `box-shadow:0 0 0 4px #ffffff, 0 0 22px ${color}cc;`
+        : `box-shadow:0 3px 8px rgba(0,0,0,0.65);`
+    const pulseClass = isSelected ? 'marker-selected-pulse' : ''
+
+    // Count badge — sits top-right of the dot
+    const badgeFontSize = count >= 10 ? 7 : 9
+    const badge = `<div style="
+        position:absolute;
+        top:-3px;
+        right:-3px;
+        min-width:15px;
+        height:15px;
+        padding:0 3px;
+        background:#0f172a;
+        border:2px solid rgba(255,255,255,0.92);
+        border-radius:999px;
+        font-size:${badgeFontSize}px;
+        font-weight:800;
+        color:white;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-family:Inter,system-ui,sans-serif;
+        line-height:1;
+        box-shadow:0 1px 4px rgba(0,0,0,0.5);
+        z-index:2;
+    ">${count}</div>`
+
+    return L.divIcon({
+        className: '',
+        html: `<div style="width:${total}px;height:${total}px;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;">
+  <div class="${pulseClass}" style="position:relative;">
+    <div style="
       width:${dot}px;
       height:${dot}px;
       background:${color};
@@ -86,18 +120,20 @@ function createMarkerIcon(color: string, isSelected: boolean): L.DivIcon {
       border:3px solid rgba(255,255,255,0.95);
       ${ring}
       transition:all 0.15s ease;
-    "></div></div>`,
+    "></div>
+    ${badge}
+  </div>
+</div>`,
         iconSize: [total, total],
         iconAnchor: [total / 2, total / 2],
     })
 }
 
-// ── Type-based marker color ───────────────────────────────────────────
-// Thermal always orange so pairs (thermal+visual at same GPS) are
-// visually distinct even after jitter offset separates them.
+
+// ── Type-based marker color (for single images) ──────────────────
 function getMarkerColor(image: ImageData): string {
-    if (image.type === 'thermal') return '#f97316'  // 🌡 orange
-    return image.folderColor                         // 📷 folder color
+    if (image.type === 'thermal') return '#f97316'
+    return image.folderColor
 }
 
 // ── Cluster icon factory ───────────────────────────────────────
@@ -331,71 +367,104 @@ const MapView: React.FC = () => {
                         },
                     }}
                 >
-                    {filteredImages.map((image) => {
-                        const isSelected = selectedImage?.id === image.id
-                        // Color: thermal always orange, visual gets folder color
-                        const markerColor = getMarkerColor(image)
-                        const icon = createMarkerIcon(markerColor, isSelected)
-                        // EXACT GPS — no jitter offset
-                        const pos: [number, number] = [image.latitude, image.longitude]
+                    {/* Render ONE marker per unique GPS location.
+                         - Solo image  → plain colored dot
+                         - 2+ images   → split-pie colored dot + optional +N badge
+                         We skip duplicate locations (already rendered by first image in group). */
+                        (() => {
+                            const renderedLocations = new Set<string>()
+                            return filteredImages.map((image) => {
+                                const group = locationGroups.get(image.id) ?? [image]
+                                // Use the first image in the group as the representative — skip others
+                                const reprId = group[0].id
+                                if (reprId !== image.id) return null
 
-                        return (
-                            <Marker
-                                key={`${image.id}-${isSelected}`}
-                                position={pos as [number, number]}
-                                icon={icon}
-                                eventHandlers={{
-                                    // Attach folderColor so cluster icon can read it
-                                    add: (e: L.LeafletEvent) => {
-                                        (e.target as L.Marker & { options: { folderColor: string } }).options.folderColor = image.folderColor
-                                    },
-                                    click: () => handleMarkerClick(image),
-                                    mouseover: (e) => handleMarkerHover(image, e as unknown as L.LeafletMouseEvent),
-                                    mouseout: () => scheduleHoverClear(),
-                                }}
-                            >
-                                <Popup className="custom-popup" maxWidth={260}>
-                                    <div className="popup-inner">
-                                        {image.objectUrl ? (
-                                            <div className="popup-thumb-wrap"
-                                                onClick={() => openLightbox(image)} title="Open full photo">
-                                                <img src={image.objectUrl} alt={image.name} className="popup-img" />
-                                                <div className="popup-thumb-overlay">
-                                                    <span className="popup-thumb-icon">🔍 Open Photo</span>
+                                // Location key to avoid duplicates (safety check)
+                                const locKey = `${image.latitude.toFixed(7)},${image.longitude.toFixed(7)}`
+                                if (renderedLocations.has(locKey)) return null
+                                renderedLocations.add(locKey)
+
+                                const isGroupSelected = group.some(g => g.id === selectedImage?.id)
+                                const pos: [number, number] = [image.latitude, image.longitude]
+
+                                // Choose icon based on group size
+                                // Grouped: same color as representative image, but larger + count badge
+                                const reprColor = getMarkerColor(group[0])
+                                const icon = group.length > 1
+                                    ? createGroupedMarkerIcon(reprColor, group.length, isGroupSelected)
+                                    : createMarkerIcon(getMarkerColor(image), isGroupSelected)
+
+                                // Representative image for popup display
+                                const repr = group[0]
+
+
+                                return (
+                                    <Marker
+                                        key={`loc-${locKey}-${isGroupSelected}`}
+                                        position={pos}
+                                        icon={icon}
+                                        eventHandlers={{
+                                            add: (e: L.LeafletEvent) => {
+                                                (e.target as L.Marker & { options: { folderColor: string } }).options.folderColor = repr.folderColor
+                                            },
+                                            click: () => handleMarkerClick(repr),
+                                            mouseover: (e) => handleMarkerHover(repr, e as unknown as L.LeafletMouseEvent),
+                                            mouseout: () => scheduleHoverClear(),
+                                        }}
+                                    >
+                                        <Popup className="custom-popup" maxWidth={260}>
+                                            <div className="popup-inner">
+                                                {repr.objectUrl ? (
+                                                    <div className="popup-thumb-wrap"
+                                                        onClick={() => openLightbox(repr)} title="Open full photo">
+                                                        <img src={repr.objectUrl} alt={repr.name} className="popup-img" />
+                                                        <div className="popup-thumb-overlay">
+                                                            <span className="popup-thumb-icon">🔍 Open Photo</span>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="popup-no-thumb">📷 No preview</div>
+                                                )}
+                                                <div className="popup-body">
+                                                    {group.length > 1 && (
+                                                        <div className="popup-group-badge">
+                                                            {group.map(g => (
+                                                                <span key={g.id} className="popup-group-pill"
+                                                                    style={{ background: g.type === 'thermal' ? 'rgba(249,115,22,0.18)' : 'rgba(59,130,246,0.18)', borderColor: g.type === 'thermal' ? '#f97316' : g.folderColor, color: g.type === 'thermal' ? '#fb923c' : '#93c5fd' }}>
+                                                                    {g.type === 'thermal' ? '🌡' : '📷'} {g.type}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    <div className="popup-folder-tag" style={{ borderColor: repr.folderColor }}>
+                                                        <span className="popup-folder-dot" style={{ background: repr.folderColor }} />
+                                                        {repr.folderName}
+                                                    </div>
+                                                    <p className="popup-name">{group.length > 1 ? `${group.length} images at this point` : repr.name}</p>
+                                                    <div className="popup-grid">
+                                                        <div className="popup-row">
+                                                            <span className="popup-label">📍</span>
+                                                            <span className="popup-val">{formatCoords(repr.latitude, repr.longitude)}</span>
+                                                        </div>
+                                                        <div className="popup-row">
+                                                            <span className="popup-label">⬆ Alt</span>
+                                                            <span className="popup-val">{repr.altitude.toFixed(1)} m</span>
+                                                        </div>
+                                                        <div className="popup-row">
+                                                            <span className="popup-label">🕐</span>
+                                                            <span className="popup-val">{formatTimestamp(repr.timestamp)}</span>
+                                                        </div>
+                                                    </div>
+                                                    <button className="popup-open-btn" onClick={() => openLightbox(repr)}>
+                                                        🖼 Full View
+                                                    </button>
                                                 </div>
                                             </div>
-                                        ) : (
-                                            <div className="popup-no-thumb">📷 No preview</div>
-                                        )}
-                                        <div className="popup-body">
-                                            <div className="popup-folder-tag" style={{ borderColor: image.folderColor }}>
-                                                <span className="popup-folder-dot" style={{ background: image.folderColor }} />
-                                                {image.folderName}
-                                            </div>
-                                            <p className="popup-name">{image.name}</p>
-                                            <div className="popup-grid">
-                                                <div className="popup-row">
-                                                    <span className="popup-label">📍</span>
-                                                    <span className="popup-val">{formatCoords(image.latitude, image.longitude)}</span>
-                                                </div>
-                                                <div className="popup-row">
-                                                    <span className="popup-label">⬆ Alt</span>
-                                                    <span className="popup-val">{image.altitude.toFixed(1)} m</span>
-                                                </div>
-                                                <div className="popup-row">
-                                                    <span className="popup-label">🕐</span>
-                                                    <span className="popup-val">{formatTimestamp(image.timestamp)}</span>
-                                                </div>
-                                            </div>
-                                            <button className="popup-open-btn" onClick={() => openLightbox(image)}>
-                                                🖼 Full View
-                                            </button>
-                                        </div>
-                                    </div>
-                                </Popup>
-                            </Marker>
-                        )
-                    })}
+                                        </Popup>
+                                    </Marker>
+                                )
+                            })
+                        })()}
                 </MarkerClusterGroup>
             </MapContainer>
 
