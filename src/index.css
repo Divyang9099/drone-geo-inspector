@@ -1156,12 +1156,81 @@ body {
   animation: lb-slidein 0.25s ease;
 }
 
+.lightbox-image-area.lb-zoomed {
+  cursor: grab;
+}
+
+.lightbox-image-area.lb-zoomed:active {
+  cursor: grabbing;
+}
+
 .lightbox-no-img {
   color: var(--text-muted);
   font-size: 1rem;
   text-align: center;
   padding: 60px;
 }
+
+/* ── Floating zoom controls (bottom-right of image area) ── */
+.lb-zoom-controls {
+  position: absolute;
+  bottom: 14px;
+  right: 14px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(8, 12, 22, 0.82);
+  border: 1px solid var(--border-bright);
+  border-radius: 10px;
+  padding: 4px 6px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.lb-zoom-btn {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  color: white;
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  line-height: 1;
+}
+
+.lb-zoom-btn:hover {
+  background: rgba(59, 130, 246, 0.35);
+  border-color: rgba(59, 130, 246, 0.6);
+}
+
+.lb-zoom-reset {
+  min-width: 46px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: 'Courier New', monospace;
+  cursor: pointer;
+  padding: 0 6px;
+  transition: background 0.15s ease, color 0.15s ease;
+  letter-spacing: 0.02em;
+}
+
+.lb-zoom-reset:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+}
+
 
 /* Nav buttons */
 .lightbox-nav {
