@@ -94,7 +94,7 @@ const FolderBlock: React.FC<FolderBlockProps> = ({
 const FileManager: React.FC = () => {
     const {
         folders,
-        hoveredImage,
+        hoveredImages,
         selectedImage,
         setSelectedImage,
         setHoveredImage,
@@ -104,6 +104,9 @@ const FileManager: React.FC = () => {
         totalDistance,
         showPath,
     } = useStore()
+
+    // derive a single "primary" hovered image for backward compat
+    const hoveredImage = hoveredImages[0] ?? null
 
     // When map selects/hovers an image, auto-expand that folder
     useEffect(() => {

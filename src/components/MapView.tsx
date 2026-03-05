@@ -204,66 +204,28 @@ const LayerToggle: React.FC = () => {
     )
 }
 
-// ── True Spatial Jitter: uniformly spread close points ──────────────────
-// Groups images that are physically within ~8 meters of each other (0.00008 deg)
-// and spreads them around their shared center point. This ensures that even
-// points just across a string-rounding boundary get properly grouped and fanned out.
-function buildJitteredPositions(images: ImageData[]): Map<string, [number, number]> {
-    const positions = new Map<string, [number, number]>()
-    const groups: ImageData[][] = []
-    const THRESHOLD = 0.00008 // approx 8-9 meters
+// ── Group images at the exact same GPS coordinate ─────────────────────────
+// Returns a map from image.id -> all images that share its lat/lng.
+// Two images are "same location" if they are within ~1 meter (0.000009 deg).
+const SAME_LOC_THRESHOLD = 0.000009 // ~1 meter
 
-    // Spatial grouping
+function buildLocationGroups(images: ImageData[]): Map<string, ImageData[]> {
+    const groupMap = new Map<string, ImageData[]>()
+    const processed = new Set<string>()
+
     for (const img of images) {
-        let found = false
-        for (const group of groups) {
-            // Check if this image is close to ANY image in the group
-            const isClose = group.some(g =>
-                Math.abs(g.latitude - img.latitude) < THRESHOLD &&
-                Math.abs(g.longitude - img.longitude) < THRESHOLD
-            )
-            if (isClose) {
-                group.push(img)
-                found = true
-                break
-            }
-        }
-        if (!found) groups.push([img])
+        if (processed.has(img.id)) continue
+        // Collect all images within threshold of this image's coords
+        const group = images.filter(other =>
+            Math.abs(other.latitude - img.latitude) < SAME_LOC_THRESHOLD &&
+            Math.abs(other.longitude - img.longitude) < SAME_LOC_THRESHOLD
+        )
+        group.forEach(g => {
+            processed.add(g.id)
+            groupMap.set(g.id, group)
+        })
     }
-
-    // Apply jitter to each group
-    for (const group of groups) {
-        if (group.length === 1) {
-            // Lone image — exact GPS
-            positions.set(group[0].id, [group[0].latitude, group[0].longitude])
-        } else {
-            // Calculate center of mass for the group
-            const cLat = group.reduce((sum, img) => sum + img.latitude, 0) / group.length
-            const cLng = group.reduce((sum, img) => sum + img.longitude, 0) / group.length
-
-            // Sort: visual first (at 0°), thermal second (at 180° for pairs)
-            // This guarantees thermal & visual are always on opposite sides
-            const sorted = [...group].sort((a, b) => {
-                const rank = (t: string) => t === 'visual' ? 0 : t === 'thermal' ? 1 : 2
-                return rank(a.type) - rank(b.type)
-            })
-
-            const n = sorted.length
-            // Base radius: 0.000040° ≈ 4.4m; grows a little for large groups
-            const radius = 0.000040 * (1 + Math.max(0, n - 2) * 0.15)
-
-            sorted.forEach((img, i) => {
-                // Evenly distribute angles; start at 90° so pair is N/S not E/W
-                const angle = (Math.PI / 2) + (i / n) * Math.PI * 2
-                positions.set(img.id, [
-                    cLat + radius * Math.sin(angle),
-                    cLng + radius * Math.cos(angle),
-                ])
-            })
-        }
-    }
-
-    return positions
+    return groupMap
 }
 
 
@@ -273,7 +235,7 @@ const MapView: React.FC = () => {
         filteredImages,
         selectedImage,
         setSelectedImage,
-        setHoveredImage,
+        setHoveredImages,
         scheduleHoverClear,
         openLightbox,
         showPath,
@@ -282,9 +244,9 @@ const MapView: React.FC = () => {
 
     const tile = TILES[mapLayer]
 
-    // Compute jitter positions only when images change
-    const jitteredPositions = useMemo(
-        () => buildJitteredPositions(filteredImages),
+    // Compute location groups — which images share the same GPS point
+    const locationGroups = useMemo(
+        () => buildLocationGroups(filteredImages),
         [filteredImages]
     )
 
@@ -298,9 +260,11 @@ const MapView: React.FC = () => {
     const handleMarkerHover = useCallback(
         (image: ImageData, e: L.LeafletMouseEvent) => {
             const cp = e.containerPoint
-            setHoveredImage(image, { x: cp.x, y: cp.y })
+            // Get all images at this location and show them grouped
+            const group = locationGroups.get(image.id) ?? [image]
+            setHoveredImages(group, { x: cp.x, y: cp.y })
         },
-        [setHoveredImage]
+        [setHoveredImages, locationGroups]
     )
 
     return (
@@ -334,8 +298,7 @@ const MapView: React.FC = () => {
                     chunkedLoading
                     maxClusterRadius={40}
                     showCoverageOnHover={false}
-                    spiderfyOnMaxZoom={true}
-                    spiderfyDistanceMultiplier={3.5}
+                    spiderfyOnMaxZoom={false}
                     zoomToBoundsOnClick={false}
                     disableClusteringAtZoom={18}
                     // @ts-ignore
@@ -373,7 +336,8 @@ const MapView: React.FC = () => {
                         // Color: thermal always orange, visual gets folder color
                         const markerColor = getMarkerColor(image)
                         const icon = createMarkerIcon(markerColor, isSelected)
-                        const pos = jitteredPositions.get(image.id) ?? [image.latitude, image.longitude]
+                        // EXACT GPS — no jitter offset
+                        const pos: [number, number] = [image.latitude, image.longitude]
 
                         return (
                             <Marker

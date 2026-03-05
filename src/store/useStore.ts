@@ -35,7 +35,7 @@ interface AppState {
     allImages: ImageData[]           // sorted union of all folders
     filteredImages: ImageData[]      // filtered subset
     selectedImage: ImageData | null
-    hoveredImage: ImageData | null
+    hoveredImages: ImageData[]
     hoverPosition: HoverPosition | null
     lightboxImage: ImageData | null
     filterType: FilterType
@@ -53,6 +53,7 @@ interface AppState {
     removeFolder: (folderId: string) => void
     setSelectedImage: (image: ImageData | null) => void
     setHoveredImage: (image: ImageData | null, pos: HoverPosition | null) => void
+    setHoveredImages: (images: ImageData[], pos: HoverPosition | null) => void
     scheduleHoverClear: () => void      // start 250ms delayed hide
     keepHoverAlive: () => void          // cancel the pending hide (card mouseenter)
     openLightbox: (image: ImageData) => void
@@ -72,7 +73,7 @@ export const useStore = create<AppState>((set, get) => ({
     allImages: [],
     filteredImages: [],
     selectedImage: null,
-    hoveredImage: null,
+    hoveredImages: [],
     hoverPosition: null,
     lightboxImage: null,
     filterType: 'all',
@@ -101,21 +102,26 @@ export const useStore = create<AppState>((set, get) => ({
         })
         const newFolders = get().folders.filter((f) => f.id !== folderId)
         const computed = computeAll(newFolders, get().filterType)
-        set({ folders: newFolders, ...computed, selectedImage: null, hoveredImage: null })
+        set({ folders: newFolders, ...computed, selectedImage: null, hoveredImages: [] })
     },
 
     setSelectedImage: (image) => set({ selectedImage: image }),
 
     setHoveredImage: (image, pos) => {
         if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null }
-        set({ hoveredImage: image, hoverPosition: pos })
+        set({ hoveredImages: image ? [image] : [], hoverPosition: pos })
+    },
+
+    setHoveredImages: (images, pos) => {
+        if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null }
+        set({ hoveredImages: images, hoverPosition: pos })
     },
 
     scheduleHoverClear: () => {
         if (hoverTimer) clearTimeout(hoverTimer)
         hoverTimer = setTimeout(() => {
             hoverTimer = null
-            set({ hoveredImage: null, hoverPosition: null })
+            set({ hoveredImages: [], hoverPosition: null })
         }, 200)   // 200ms — time to move from marker to card without flicker
     },
 
@@ -158,7 +164,7 @@ export const useStore = create<AppState>((set, get) => ({
             allImages: [],
             filteredImages: [],
             selectedImage: null,
-            hoveredImage: null,
+            hoveredImages: [],
             hoverPosition: null,
             lightboxImage: null,
             filterType: 'all',

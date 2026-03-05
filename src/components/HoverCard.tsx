@@ -1,10 +1,11 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useStore } from '../store/useStore'
 import { formatCoords } from '../utils/geoUtils'
+import type { ImageData } from '../types/ImageData'
 
 const HoverCard: React.FC = () => {
     const {
-        hoveredImage,
+        hoveredImages,
         hoverPosition,
         openLightbox,
         setSelectedImage,
@@ -13,11 +14,17 @@ const HoverCard: React.FC = () => {
         scheduleHoverClear,
     } = useStore()
 
-    if (!hoveredImage || !hoverPosition) return null
+    const [activeIdx, setActiveIdx] = useState(0)
+
+    if (!hoveredImages.length || !hoverPosition) return null
+
+    // Reset tab if out of range
+    const safeIdx = Math.min(activeIdx, hoveredImages.length - 1)
+    const image: ImageData = hoveredImages[safeIdx]
 
     // Smart position: flip left if near right edge, flip up if near bottom
-    const CARD_W = 248
-    const CARD_H = 225
+    const CARD_W = 260
+    const CARD_H = hoveredImages.length > 1 ? 268 : 238
     const MARGIN = 16
 
     let left = hoverPosition.x + MARGIN
@@ -29,19 +36,13 @@ const HoverCard: React.FC = () => {
     if (top < 4) top = 4
 
     const typeLabel =
-        hoveredImage.type === 'thermal' ? '🌡 Thermal'
-            : hoveredImage.type === 'visual' ? '📷 Visual'
+        image.type === 'thermal' ? '🌡 Thermal'
+            : image.type === 'visual' ? '📷 Visual'
                 : '❓ Unknown'
 
     const closeCard = () => setHoveredImage(null, null)
 
     return (
-        /*
-         * NO backdrop — the backdrop was blocking all marker mouse events.
-         * The card uses pointer-events:auto so keepHoverAlive works,
-         * letting users move to the card and click buttons without it disappearing.
-         * When the user hovers a different marker, setHoveredImage updates instantly.
-         */
         <div
             className="hover-card"
             style={{ left, top }}
@@ -49,16 +50,39 @@ const HoverCard: React.FC = () => {
             onMouseLeave={scheduleHoverClear}
         >
             {/* Folder color stripe */}
-            <div className="hover-card-stripe" style={{ background: hoveredImage.folderColor }} />
+            <div className="hover-card-stripe" style={{ background: image.folderColor }} />
 
             {/* Close ✕ button */}
             <button className="hover-card-close" onClick={closeCard} title="Close">✕</button>
 
+            {/* Tab bar — only visible when multiple images at same location */}
+            {hoveredImages.length > 1 && (
+                <div className="hover-card-tabs">
+                    {hoveredImages.map((img, i) => (
+                        <button
+                            key={img.id}
+                            className={`hover-tab-btn ${i === safeIdx ? 'active' : ''}`}
+                            style={{ borderBottomColor: i === safeIdx ? img.folderColor : 'transparent' }}
+                            onClick={() => setActiveIdx(i)}
+                            title={img.name}
+                        >
+                            <span
+                                className="hover-tab-dot"
+                                style={{ background: img.type === 'thermal' ? '#f97316' : img.folderColor }}
+                            />
+                            {img.type === 'thermal' ? '🌡' : '📷'}
+                            <span className="hover-tab-label">{i + 1}</span>
+                        </button>
+                    ))}
+                    <span className="hover-tab-count">{hoveredImages.length} at this point</span>
+                </div>
+            )}
+
             {/* Thumbnail */}
-            {hoveredImage.objectUrl && (
+            {image.objectUrl && (
                 <img
-                    src={hoveredImage.objectUrl}
-                    alt={hoveredImage.name}
+                    src={image.objectUrl}
+                    alt={image.name}
                     className="hover-card-thumb"
                 />
             )}
@@ -68,24 +92,24 @@ const HoverCard: React.FC = () => {
                     <span className="hover-card-type">{typeLabel}</span>
                     <span
                         className="hover-card-folder-dot"
-                        style={{ background: hoveredImage.folderColor }}
-                        title={hoveredImage.folderName}
+                        style={{ background: image.folderColor }}
+                        title={image.folderName}
                     />
                 </div>
 
-                <p className="hover-card-name">{hoveredImage.name}</p>
-                <p className="hover-card-folder">📁 {hoveredImage.folderName}</p>
+                <p className="hover-card-name">{image.name}</p>
+                <p className="hover-card-folder">📁 {image.folderName}</p>
 
                 <div className="hover-card-meta">
-                    <span>📍 {formatCoords(hoveredImage.latitude, hoveredImage.longitude)}</span>
-                    <span>⬆ {hoveredImage.altitude.toFixed(1)} m</span>
+                    <span>📍 {formatCoords(image.latitude, image.longitude)}</span>
+                    <span>⬆ {image.altitude.toFixed(1)} m</span>
                 </div>
 
                 <button
                     className="hover-card-btn"
                     onClick={() => {
-                        setSelectedImage(hoveredImage)
-                        openLightbox(hoveredImage)
+                        setSelectedImage(image)
+                        openLightbox(image)
                         closeCard()
                     }}
                 >
